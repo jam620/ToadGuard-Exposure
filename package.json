@@ -12,8 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "eslint src --ext .ts,.tsx && prettier --check \"src/**/*.{ts,tsx}\"",
     "lint:fix": "eslint src --ext .ts,.tsx --fix && prettier --write \"src/**/*.{ts,tsx}\"",
-    "migrate": "wrangler d1 execute toadguard --local --file infra/d1/migrations/0001_initial.sql && wrangler d1 execute toadguard --local --file infra/d1/migrations/0002_rbac.sql && wrangler d1 execute toadguard --local --file infra/d1/migrations/0003_webhooks.sql",
-    "migrate:staging": "wrangler d1 execute toadguard --env staging --file infra/d1/migrations/0001_initial.sql && wrangler d1 execute toadguard --env staging --file infra/d1/migrations/0002_rbac.sql && wrangler d1 execute toadguard --env staging --file infra/d1/migrations/0003_webhooks.sql",
+    "migrate": "wrangler d1 execute toadguard --local --file infra/d1/migrations/0001_initial.sql && wrangler d1 execute toadguard --local --file infra/d1/migrations/0002_rbac.sql && wrangler d1 execute toadguard --local --file infra/d1/migrations/0003_webhooks.sql && wrangler d1 execute toadguard --local --file infra/d1/migrations/0004_alert_dedupe_index.sql",
+    "migrate:staging": "wrangler d1 execute toadguard --env staging --file infra/d1/migrations/0001_initial.sql && wrangler d1 execute toadguard --env staging --file infra/d1/migrations/0002_rbac.sql && wrangler d1 execute toadguard --env staging --file infra/d1/migrations/0003_webhooks.sql && wrangler d1 execute toadguard --env staging --file infra/d1/migrations/0004_alert_dedupe_index.sql",
     "deploy": "wrangler deploy",
     "preview": "vite preview src/web --port 5173"
   },
@@ -45,6 +45,6 @@
     "typescript": "^5.6.3",
     "vite": "^5.4.9",
     "vitest": "^2.1.2",
-    "wrangler": "^3.78.5"
+    "wrangler": "^4.86.0"
   }
 }
