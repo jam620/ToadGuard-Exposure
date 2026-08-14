@@ -20,6 +20,8 @@ ENVIRONMENT = "development"
 HIBP_BASE_URL = "http://localhost:9999/hibp"
 RSS_FEED_URL = "http://localhost:9999/rss"
 JWT_ALGORITHM = "RS256"
+COLLECTOR_ENABLED = "true"
+SIMULATED_SOURCE_MAX_RECORDS = "2000"
 
 # Secrets (set via `wrangler secret put`):
 # OTX_API_KEY
@@ -42,6 +44,9 @@ ENVIRONMENT = "staging"
 HIBP_BASE_URL = "https://haveibeenpwned.com/api/v3"
 RSS_FEED_URL = "https://feeds.feedburner.com/TheHackersNews"
 JWT_ALGORITHM = "RS256"
+# Flip to "false" + redeploy to pause the cron/_trigger collector without touching secrets.
+COLLECTOR_ENABLED = "true"
+SIMULATED_SOURCE_MAX_RECORDS = "2000"
 
 [[env.staging.d1_databases]]
 binding = "DB"

@@ -2,7 +2,11 @@ import type { Context } from 'hono';
 
 import { HTTPException } from 'hono/http-exception';
 
+import { logStageError } from '../../debug-log';
+
 export function errorHandler(err: Error, c: Context): Response {
+  logStageError('api', c.req.path, err);
+
   if (err instanceof HTTPException) {
     return c.json(
       {

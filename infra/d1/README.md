@@ -31,3 +31,12 @@ bun run migrate:staging
 1. Create `infra/d1/migrations/000N_description.sql`
 2. Add it to the `migrate` and `migrate:staging` scripts in `package.json`
 3. Run locally to verify
+
+## Maintenance scripts
+
+`infra/d1/maintenance/` holds destructive, manual-only SQL (e.g. dedupe
+backfills) that must never be auto-applied. It is **not** wired into
+`migrate`/`migrate:staging`. Each script documents its own review/backup/
+confirmation steps in its header comment — run it by hand with
+`wrangler d1 execute <db> --env <env> --file infra/d1/maintenance/<file>.sql`
+only after that process, never as part of routine deploys.

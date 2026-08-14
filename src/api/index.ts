@@ -5,6 +5,7 @@ import { cors } from 'hono/cors';
 
 import { handleCallback, handleLogin, handleMe } from '../auth';
 import { runCollector } from '../collector';
+import { logStageError, sanitizeErrorMessage } from '../debug-log';
 import { authMiddleware } from './middleware/auth';
 import { errorHandler } from './middleware/error-handler';
 import { rateLimitMiddleware } from './middleware/rate-limit';
@@ -29,8 +30,27 @@ app.get('/_health', (c) => c.json({ status: 'ok' }));
 // Staging-only manual pipeline trigger – remove before production
 app.post('/_trigger', async (c) => {
   if (c.env.ENVIRONMENT === 'production') return c.json({ error: 'Forbidden' }, 403);
-  await runCollector(c.env);
-  return c.json({ triggered: true });
+
+  try {
+    const summary = await runCollector(c.env);
+    return c.json({ triggered: true, ...summary });
+  } catch (err) {
+    logStageError('trigger', 'runCollector', err);
+
+    // Staging-only: surface a sanitized detail so the failure is visible
+    // without needing wrangler tail. Never reaches production (checked above).
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json(
+      {
+        type: 'about:blank',
+        title: 'Internal Server Error',
+        status: 500,
+        detail: `staging debug: ${sanitizeErrorMessage(message)}`,
+        instance: '/_trigger',
+      },
+      500
+    );
+  }
 });
 
 app.get('/api/v1/health', (c) => healthRouter.fetch(c.req.raw, c.env));

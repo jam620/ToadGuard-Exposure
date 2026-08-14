@@ -1,9 +1,11 @@
 import type { Env, LeakRecord } from '../types';
 import type { LeakRecordRow } from '../detector';
 
+import { logStageError, logStageInfo } from '../debug-log';
 import { detectAndPersistBatch, rowToLeakRecord } from '../detector';
 import { normalize } from '../normalizer';
 import { buildCollectorJobId } from './collector-utils';
+import { isCircuitOpen, isD1FullError, tripCircuit } from './circuit-breaker';
 import { fetchHibpRecords } from './hib-feed';
 import { fetchRssRecords } from './rss-feed';
 import { generateSimulatedRecords } from './simulated-feed';
@@ -66,10 +68,20 @@ async function persistRecords(
     }
   }
 
-  await db
-    .prepare(`UPDATE collector_jobs SET finished_at=?, records_inserted=?, errors=? WHERE id=?`)
-    .bind(new Date().toISOString(), inserted, JSON.stringify(errors), jobId)
-    .run();
+  try {
+    await db
+      .prepare(`UPDATE collector_jobs SET finished_at=?, records_inserted=?, errors=? WHERE id=?`)
+      .bind(new Date().toISOString(), inserted, JSON.stringify(errors), jobId)
+      .run();
+  } catch (err) {
+    logStageError('collector.persist', 'update-collector-job', err, {
+      jobId,
+      inserted,
+      recordCount: records.length,
+      perRecordErrors: errors.length,
+    });
+    throw err;
+  }
 
   return { inserted, errors, newRecords };
 }
@@ -77,13 +89,67 @@ async function persistRecords(
 // Backfill: number of old unenriched records to process per cron run.
 const BACKFILL_BATCH = 30;
 
-export async function runCollector(env: Env): Promise<void> {
-  const sources: CollectorSource[] = [
-    {
+// The 'simulated' source has no natural end (it's fake demo data), and ran
+// unbounded every 5 minutes for ~4 months in staging, which is what actually
+// filled D1 to its size limit (99.9996% of leak_records). Cap how many
+// simulated rows can accumulate in total instead of removing the source.
+const DEFAULT_SIMULATED_SOURCE_MAX_RECORDS = 2000;
+
+function getSimulatedSourceCap(env: Env): number {
+  const parsed = Number(env.SIMULATED_SOURCE_MAX_RECORDS);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_SIMULATED_SOURCE_MAX_RECORDS;
+}
+
+export interface CollectorRunSummary {
+  recordsProcessed: number;
+  alertsCreated: number;
+  /** Set when the run short-circuited before touching D1 or any source. */
+  skipped?: 'disabled' | 'circuit-open';
+}
+
+export async function runCollector(env: Env): Promise<CollectorRunSummary> {
+  if (env.COLLECTOR_ENABLED === 'false') {
+    logStageInfo('collector', 'runCollector-skipped', { reason: 'COLLECTOR_ENABLED=false' });
+    return { recordsProcessed: 0, alertsCreated: 0, skipped: 'disabled' };
+  }
+
+  if (await isCircuitOpen(env.KV)) {
+    logStageInfo('collector', 'runCollector-skipped', { reason: 'circuit-open-d1-full' });
+    return { recordsProcessed: 0, alertsCreated: 0, skipped: 'circuit-open' };
+  }
+
+  try {
+    return await runCollectorOnce(env);
+  } catch (err) {
+    if (isD1FullError(err)) {
+      await tripCircuit(env.KV);
+      logStageError('collector.circuit-breaker', 'trip', err, { cooldownSeconds: 900 });
+    }
+    throw err;
+  }
+}
+
+async function runCollectorOnce(env: Env): Promise<CollectorRunSummary> {
+  let recordsProcessed = 0;
+  let alertsCreated = 0;
+
+  const sources: CollectorSource[] = [];
+
+  const simulatedCap = getSimulatedSourceCap(env);
+  const simulatedCountRow = await env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM leak_records WHERE source_id = 'simulated'`
+  ).first<{ count: number }>();
+  const simulatedCount = simulatedCountRow?.count ?? 0;
+
+  if (simulatedCount < simulatedCap) {
+    const remaining = simulatedCap - simulatedCount;
+    sources.push({
       name: 'simulated',
-      fetch: async () => generateSimulatedRecords(),
-    },
-  ];
+      fetch: async () => generateSimulatedRecords().slice(0, remaining),
+    });
+  } else {
+    logStageInfo('collector.fetch', 'simulated-capped', { simulatedCount, simulatedCap });
+  }
 
   if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_IDS) {
     sources.push({
@@ -117,7 +183,8 @@ export async function runCollector(env: Env): Promise<void> {
     let rawItems: unknown[] = [];
     try {
       rawItems = await source.fetch();
-    } catch {
+    } catch (err) {
+      logStageError('collector.fetch', source.name, err, { jobId });
       await env.DB.prepare(`UPDATE collector_jobs SET finished_at=?, errors=? WHERE id=?`)
         .bind(new Date().toISOString(), JSON.stringify(['fetch failed']), jobId)
         .run();
@@ -140,24 +207,52 @@ export async function runCollector(env: Env): Promise<void> {
       .map((r) => r.value);
 
     const { newRecords } = await persistRecords(successful, env.DB, jobId);
+    recordsProcessed += newRecords.length;
 
     // Run detection immediately on records inserted in this job
     if (newRecords.length > 0) {
-      await detectAndPersistBatch(newRecords, env);
+      try {
+        const result = await detectAndPersistBatch(newRecords, env);
+        alertsCreated += result.alertsCreated;
+      } catch (err) {
+        logStageError('collector.detect', source.name, err, {
+          jobId,
+          newRecords: newRecords.length,
+        });
+        throw err;
+      }
     }
   }
 
   // Backfill: process a batch of old records that predate the detection pipeline
-  const backfillResult = await env.DB.prepare(
-    `SELECT * FROM leak_records WHERE enriched = 0 ORDER BY created_at DESC LIMIT ?`
-  )
-    .bind(BACKFILL_BATCH)
-    .all<LeakRecordRow>();
+  try {
+    const backfillResult = await env.DB.prepare(
+      `SELECT * FROM leak_records WHERE enriched = 0 ORDER BY created_at DESC LIMIT ?`
+    )
+      .bind(BACKFILL_BATCH)
+      .all<LeakRecordRow>();
 
-  if (backfillResult.results.length > 0) {
-    const records = backfillResult.results.map(rowToLeakRecord);
-    await detectAndPersistBatch(records, env);
+    if (backfillResult.results.length > 0) {
+      const records = backfillResult.results.map(rowToLeakRecord);
+      const result = await detectAndPersistBatch(records, env);
+      recordsProcessed += result.recordsProcessed;
+      alertsCreated += result.alertsCreated;
+    }
+  } catch (err) {
+    logStageError('collector.backfill', 'detectAndPersistBatch', err, {
+      recordsProcessed,
+      alertsCreated,
+    });
+    throw err;
   }
+
+  logStageInfo('collector', 'runCollector', {
+    sources: sources.length,
+    recordsProcessed,
+    alertsCreated,
+  });
+
+  return { recordsProcessed, alertsCreated };
 }
 
 export default {

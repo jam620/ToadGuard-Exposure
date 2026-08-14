@@ -1,7 +1,8 @@
 import type { Alert, Env, LeakRecord, Severity } from '../types';
 
+import { logStageError, logStageInfo } from '../debug-log';
 import { dispatch } from '../webhooks/dispatcher';
-import { sendTelegramNotification } from '../webhooks/telegram';
+import { sendTelegramNotification, type AlertNotificationContext } from '../webhooks/telegram';
 import { buildAlert } from './alert-builder';
 import { enrich } from './enrichment';
 import { rules } from './rules';
@@ -75,6 +76,7 @@ export async function detectAndPersistBatch(
   let alertsCreated = 0;
   const batch = records.slice(0, DETECT_BATCH);
   const newAlerts: Alert[] = [];
+  const criticalContexts: AlertNotificationContext[] = [];
 
   for (const record of batch) {
     try {
@@ -82,6 +84,7 @@ export async function detectAndPersistBatch(
       const matchingRules = rules.filter((r) => r.enabled && r.match(record));
 
       const stmts: D1PreparedStatement[] = [];
+      const pendingAlerts: Alert[] = [];
 
       for (const rule of matchingRules) {
         const score = calculateCompositeScore(
@@ -90,6 +93,10 @@ export async function detectAndPersistBatch(
           enrichmentResult.abuseIpDb
         );
         const alert = buildAlert(record, rule, enrichmentResult, score);
+        // record_id + rule_id is the alert's deterministic identity (see
+        // idx_alerts_record_rule): INSERT OR IGNORE now actually dedupes
+        // repeat detections of the same record/rule across cron runs,
+        // instead of always inserting a new row under a fresh random id.
         stmts.push(
           DB.prepare(
             `INSERT OR IGNORE INTO alerts
@@ -107,9 +114,10 @@ export async function detectAndPersistBatch(
             alert.updatedAt
           )
         );
-        newAlerts.push(alert);
-        alertsCreated++;
+        pendingAlerts.push(alert);
       }
+
+      const alertStmtCount = stmts.length;
 
       // Only persist enrichment rows when the record had an actionable IOC
       if (record.ipAddress || record.domain) {
@@ -142,27 +150,51 @@ export async function detectAndPersistBatch(
       // Always mark enriched=1 so the record is not reprocessed
       stmts.push(DB.prepare('UPDATE leak_records SET enriched = 1 WHERE id = ?').bind(record.id));
 
-      await DB.batch(stmts);
-    } catch {
+      const results = await DB.batch(stmts);
+
+      // meta.changes === 0 means the unique (record_id, rule_id) index
+      // silently ignored a duplicate — don't count or re-notify on it.
+      for (let i = 0; i < alertStmtCount; i++) {
+        const alert = pendingAlerts[i];
+        const inserted = (results[i]?.meta.changes ?? 0) > 0;
+        if (!alert || !inserted) continue;
+
+        newAlerts.push(alert);
+        alertsCreated++;
+        if (alert.severity === 'CRITICAL') {
+          criticalContexts.push({ alert, record });
+        }
+      }
+    } catch (err) {
       // Don't let one failure block the rest; mark enriched to avoid infinite retry
+      logStageError('detector.record', 'DB.batch', err, { recordId: record.id });
       try {
         await DB.prepare('UPDATE leak_records SET enriched = 1 WHERE id = ?').bind(record.id).run();
-      } catch {
-        // best-effort
+      } catch (fallbackErr) {
+        logStageError('detector.record', 'mark-enriched-fallback', fallbackErr, {
+          recordId: record.id,
+        });
       }
     }
   }
 
   // Fire notifications after all DB writes — failures must not affect the return value
   if (newAlerts.length > 0) {
-    const criticalAlerts = newAlerts.filter((a) => a.severity === 'CRITICAL');
     await Promise.allSettled([
       // Webhook delivery (no-op when no webhooks are configured in D1)
       ...newAlerts.map((a) => dispatch(a, env)),
       // Telegram: one summary message per batch to avoid rate-limit spam
-      criticalAlerts.length > 0 ? sendTelegramNotification(criticalAlerts, env) : Promise.resolve(),
+      criticalContexts.length > 0
+        ? sendTelegramNotification(criticalContexts, env)
+        : Promise.resolve(),
     ]);
   }
+
+  logStageInfo('detector', 'detectAndPersistBatch', {
+    recordsProcessed: batch.length,
+    alertsCreated,
+    criticalAlerts: criticalContexts.length,
+  });
 
   return { alertsCreated, recordsProcessed: batch.length };
 }

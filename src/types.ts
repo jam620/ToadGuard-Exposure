@@ -160,6 +160,10 @@ export interface Env {
   HIBP_BASE_URL: string;
   RSS_FEED_URL: string;
   JWT_ALGORITHM: string;
+  /** Manual kill switch for the collector cron/trigger. Set to "false" to pause. */
+  COLLECTOR_ENABLED?: string;
+  /** Caps total accumulated rows from the fake 'simulated' source. Default 2000. */
+  SIMULATED_SOURCE_MAX_RECORDS?: string;
   OTX_API_KEY?: string;
   ABUSEIPDB_API_KEY?: string;
   TELEGRAM_BOT_TOKEN?: string;

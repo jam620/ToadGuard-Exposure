@@ -9,3 +9,6 @@ playwright-report/
 tests/e2e-results/
 *.tsbuildinfo
 .DS_Store
+
+# D1 backups contain real leak data (emails, password hashes, IPs) — never commit
+infra/d1/backups/
