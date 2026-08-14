@@ -1,0 +1,53 @@
+name = "toadguard-exposure"
+main = "src/api/index.ts"
+compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "toadguard"
+database_id = "local-toadguard-db"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "local-toadguard-kv"
+
+[vars]
+ENVIRONMENT = "development"
+HIBP_BASE_URL = "http://localhost:9999/hibp"
+RSS_FEED_URL = "http://localhost:9999/rss"
+JWT_ALGORITHM = "RS256"
+
+# Secrets (set via `wrangler secret put`):
+# OTX_API_KEY
+# ABUSEIPDB_API_KEY
+# TELEGRAM_BOT_TOKEN
+# TELEGRAM_CHAT_IDS
+# JWT_PRIVATE_KEY
+# JWT_PUBLIC_KEY
+# OAUTH_GOOGLE_CLIENT_ID
+# OAUTH_GOOGLE_CLIENT_SECRET
+# OAUTH_GITHUB_CLIENT_ID
+# OAUTH_GITHUB_CLIENT_SECRET
+# OAUTH_REDIRECT_BASE_URL
+
+[env.staging]
+name = "toadguard-exposure-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+HIBP_BASE_URL = "https://haveibeenpwned.com/api/v3"
+RSS_FEED_URL = "https://feeds.feedburner.com/TheHackersNews"
+JWT_ALGORITHM = "RS256"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "toadguard-staging"
+database_id = "0b87bfb9-003f-4998-97aa-16e377d14a13"
+
+[[env.staging.kv_namespaces]]
+binding = "KV"
+id = "eefc0796061f45deb5953f08c8c199cb"

@@ -1,0 +1,50 @@
+{
+  "name": "toadguard-exposure",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"wrangler dev --port 8787\" \"vite src/web --port 5173\"",
+    "build": "vite build src/web && wrangler build",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "lint": "eslint src --ext .ts,.tsx && prettier --check \"src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix && prettier --write \"src/**/*.{ts,tsx}\"",
+    "migrate": "wrangler d1 execute toadguard --local --file infra/d1/migrations/0001_initial.sql && wrangler d1 execute toadguard --local --file infra/d1/migrations/0002_rbac.sql && wrangler d1 execute toadguard --local --file infra/d1/migrations/0003_webhooks.sql",
+    "migrate:staging": "wrangler d1 execute toadguard --env staging --file infra/d1/migrations/0001_initial.sql && wrangler d1 execute toadguard --env staging --file infra/d1/migrations/0002_rbac.sql && wrangler d1 execute toadguard --env staging --file infra/d1/migrations/0003_webhooks.sql",
+    "deploy": "wrangler deploy",
+    "preview": "vite preview src/web --port 5173"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.56.2",
+    "chart.js": "^4.4.4",
+    "hono": "^4.6.3",
+    "react": "^18.3.1",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.29",
+    "@cloudflare/workers-types": "^4.20241011.0",
+    "@playwright/test": "^1.47.2",
+    "@types/react": "^18.3.10",
+    "@types/react-dom": "^18.3.0",
+    "@typescript-eslint/eslint-plugin": "^8.8.1",
+    "@typescript-eslint/parser": "^8.8.1",
+    "@vitejs/plugin-react": "^4.3.2",
+    "@vitest/coverage-v8": "^2.1.9",
+    "concurrently": "^9.0.1",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.31.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.9",
+    "vitest": "^2.1.2",
+    "wrangler": "^3.78.5"
+  }
+}

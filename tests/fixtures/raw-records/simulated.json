@@ -1,0 +1,21 @@
+[
+  {
+    "email": "alice@example.com",
+    "password_hash": "$2b$10$abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRS1234567",
+    "domain": "example.com",
+    "source": "simulated",
+    "tags": ["darkweb", "paste"]
+  },
+  {
+    "email": "bob@corp.io",
+    "ip": "203.0.113.42",
+    "source": "simulated",
+    "tags": ["telegram"]
+  },
+  {
+    "username": "ghost_user",
+    "domain": "corp.io",
+    "source": "hibp",
+    "tags": ["hibp", "passwords"]
+  }
+]
